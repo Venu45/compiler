@@ -1,0 +1,865 @@
+
+
+global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,out,err,fin,check
+
+space = 0
+label_number = 0
+op={
+    '+': 'add\n',
+    '-': 'sub\n',
+    '*':'call Math.multiply 2\n',
+    '/':'call Math.divide 2\n',
+    '|':'or\n',
+    '&amp':'and\n',
+    '&lt':'lt\n',
+    '&gt':'gt\n',
+    '=':'eq\n'
+}
+keywords = ['class', 'constructor', 'function', 'method', 'field', 'static', 'var', 'int', 'char', 'boolean', 'void',
+            'true', 'false', 'null', 'this', 'let', 'do', 'if', 'else', 'while', 'return']
+symbols = ['(', ')', '{', '}', '[', ']', '.', ',', ';', '+', '-', '*', '/', '&', '|', '<', '>', '=', '~']
+
+flg = 0
+
+
+class Class_Table():
+    def __init__(self,name):
+        self.static_count=0
+        self.field_count=0
+        self.total_count=0
+        self.name=name
+        self.classtable={}
+    def get_name(self):
+        return self.name
+
+
+class SubRoutineDec():
+    def __init__(self,name):
+        self.local_count = 0
+        self.argument_count = 0
+        self.total_count = 0
+        self.name = name
+        self.subroutine_table={}
+    def get_name(self) :
+        return self.name
+
+
+def remove_comments(line):
+    global flg
+    global x
+    if flg == 0:
+        if line[0] == "" or line[0] == "\n":
+            return ""
+        u = len(line)
+        if u < 2:
+            return line
+        elif line[0:2] == "//":
+            return ""
+        elif line[0:2] == "/*":
+            flg = 1
+            x = line.find("*/")
+            if x == -1:
+                return ""
+            else:
+                flg = 0
+                return remove_comments(line[x + 2:])
+        else:
+            return line[0] + remove_comments(line[1:])
+    elif flg == 1:
+        if line[0] == "" or line[0] == "\n":
+            return ""
+        u = len(line)
+        if u < 2:
+            return line
+        x = line.find("*/")
+        if x == -1:
+            return ""
+        else:
+            flg = 0
+            return remove_comments(line[x + 2:])
+
+
+def first_pass(f):
+    inp = open(f, 'r')
+    out = open(f[:-5] + '.ir', 'w')
+    global flg
+    flg = 0
+    for line in inp:
+        new_line = remove_comments(line)
+        if new_line != "" or new_line != "\n":
+            out.write(new_line + "\n")
+    inp.close()
+    out.close()
+
+
+def second_pass(f):
+    inp = open(f[:-5] + ".ir", "r")
+    out = open(f[:-5] + ".token", "w")
+    out.write("<tokens>\n")
+    flag = 0
+    for line in inp:
+        words = line.split()
+        temp = ""
+        for word in words:
+            b = True
+            if ('"' in word) and flag == 0:
+                flag += 1
+                temp += word
+                continue
+            elif ('"' not in word) and flag == 1:
+                temp += " "
+                temp += word
+                continue
+            elif ('"' in word) and flag == 1:
+                flag = 0
+                temp += " "
+                temp += word
+            if temp == "":
+                temp = word
+            for letter in temp :
+                if letter in symbols :
+                    b = False
+                    break
+            if b:
+                if temp in keywords:
+                    out.write(f'<keyword> {temp} </keyword>\n')
+                elif temp.isnumeric():
+                    out.write(f'<integerConstant> {temp} </integerConstant>\n')
+                elif '"' not in temp:
+                    out.write(f'<identifier> {word} </identifier>\n')
+                elif temp[0] == '"' and temp[-1] == '"':
+                    out.write(f'<stringConstant> {temp[1 :-1]} </stringConstant>\n')
+            else:
+                for symbol in symbols:
+                    if symbol in temp:
+                        temp = temp.replace(f'{symbol}', f" {symbol} ")
+                lt = temp.split()
+                fl = 0
+                s = ""
+                for w in lt :
+                    if '"' in w and fl == 0:
+                        s += w
+                        s += " "
+                        fl += 1
+                        continue
+                    elif '"' not in w and fl == 1:
+                        s += w
+                        s += ' '
+                        continue
+                    elif '"' in w and fl == 1:
+                        s += w
+                    if s == "" and fl == 0:
+                        s = w
+                    if s in keywords:
+                        out.write(f'<keyword> {s} </keyword>\n')
+                    elif s in symbols:
+                        if s!='<' and s!='>' and s!='&':
+                            out.write(f'<symbol> {s} </symbol>\n')
+                        elif s=='<':
+                            out.write('<symbol> &lt </symbol>\n')
+                        elif s == '>':
+                            out.write('<symbol> &gt </symbol>\n')
+                        elif s=='&':
+                            out.write('<symbol> &amp </symbol>\n')
+                    elif s.isnumeric():
+                        out.write(f'<integerConstant> {s} </integerConstant>\n')
+                    elif s[0] == '"' and s[-1] == '"':
+                        out.write(f'<stringConstant> {s[1 :-1]} </stringConstant>\n')
+                    else:
+                        out.write(f'<identifier> {s} </identifier>\n')
+                    fl = 0
+                    s = ""
+            temp = ""
+    out.write("</tokens>\n")
+    inp.close()
+    out.close()
+
+def check_identifier(lines,i,out):
+    global space, temp, line_number, check
+    if check == 1:
+        return
+    temp=lines[i]
+    if temp.split()[0]=='<identifier>' and temp.split()[-1]=='</identifier>':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        return temp.split()[1]
+    else:
+        err.write("Error: Expected <identifier>  but " + temp.split()[1] + "\n")
+        check = 1
+        return temp.split()[1]
+def check_field(lines,i,out):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1] == 'static' or temp.split()[1] == 'field':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        return temp.split()[1]
+def check_type(lines,i,out):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1] == 'int' or temp.split()[1] == 'char' or temp.split()[1] == 'boolean' \
+            or (temp.split()[0]=='<identifier>' and temp.split()[-1]=='</identifier>'):
+        out.write(" " * space)
+        out.write(temp)
+        line_number+=1
+        return temp.split()[1]
+    else:
+        err.write("Error: Expected <identifier> but " + temp.split()[1] + " \n")
+        check = 1
+        return temp.split()[1]
+def check_symbol(lines,i,out,sym):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp == f'<symbol> {sym} </symbol>\n':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+    else:
+        err.write("Error: Expected <symbol> but " + temp.split()[1] + "\n")
+        check = 1
+        return temp.split()[1]
+def get_kind(srd,clt,x):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    for i in srd.subroutine_table.values():
+        if x == i[2]:
+            return i[0],i[-1]
+    for i in clt.classtable.values():
+        if x == i[2]:
+            return i[0],i[-1]
+    else:
+        return False,False
+def get_type(srd,clt,x):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    for i in srd.subroutine_table.values():
+        if x == i[2]:
+            return i[1],i[-1]
+    for i in clt.classtable.values():
+        if x == i[2]:
+            return i[1],i[-1]
+    else:
+        return False,False
+def check_classVarDec1(lines,i,out,clt,x,y):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp == '<symbol> , </symbol>\n':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        if x=='static':
+            clt.classtable[clt.total_count]=[x,y,check_identifier(lines,line_number,out),clt.static_count]
+            clt.static_count+=1
+        elif x=='field':
+            clt.classtable[clt.total_count] = ['this', y, check_identifier(lines, line_number, out), clt.field_count]
+            clt.field_count+=1
+        clt.total_count+=1
+        check_classVarDec1(lines,line_number,out,clt,x,y)
+    return
+def check_classVarDec2(lines,i,out,srd,x):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp == '<symbol> , </symbol>\n':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        y=check_identifier(lines,line_number,out)
+        srd.subroutine_table[srd.total_count]=['local',x,y,srd.local_count]
+        srd.local_count+=1
+        srd.total_count+=1
+        check_classVarDec2(lines, line_number, out,srd,x)
+    return
+def check_addclassVarDec(lines,i,out,clt):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1] == 'static' or temp.split()[1] == 'field':
+        out.write(" " * space)
+        out.write('<classVarDec>\n')
+        space+=2
+        x = check_field(lines,line_number,out)
+        y = check_type(lines,line_number,out)
+        if x=='static':
+            clt.classtable[clt.total_count]=['static',y,check_identifier(lines,line_number,out),clt.static_count]
+            clt.static_count+=1
+        elif x=='field':
+            clt.classtable[clt.total_count]=['this',y,check_identifier(lines,line_number,out),clt.field_count]
+            clt.field_count+=1
+        clt.total_count += 1
+        check_classVarDec1(lines,line_number,out,clt,x,y)
+        check_symbol(lines,line_number,out,';')
+        space-=2
+        out.write(" " * space)
+        out.write('</classVarDec>\n')
+        check_addclassVarDec(lines,line_number,out,clt)
+    return
+def check_parameterList2(lines,i,out,srd):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp == '<symbol> , </symbol>\n':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        x=check_type(lines,line_number,out)
+        y=check_identifier(lines,line_number,out)
+        srd.subroutine_table[srd.total_count] = ['argument', x, y, srd.argument_count]
+        srd.argument_count += 1
+        srd.total_count += 1
+        check_parameterList2(lines,line_number,out,srd)
+    return
+def check_parameterList1(lines,i,out,srd):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1]=='int' or temp.split()[1]=='char' or temp.split()[1]=='boolean' or temp.split()[0]=='<identifier>':
+        x = check_type(lines,line_number,out)
+        y = check_identifier(lines,line_number,out)
+        srd.subroutine_table[srd.total_count]=['argument',x,y,srd.argument_count]
+        srd.argument_count+=1
+        srd.total_count+=1
+        check_parameterList2(lines,line_number,out,srd)
+    return
+def check_parameterList(lines,i,out,srd):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    out.write(" " * space)
+    out.write('<parameterList>\n')
+    space += 2
+    check_parameterList1(lines,line_number,out,srd)
+    space -= 2
+    out.write(" " * space)
+    out.write('</parameterList>\n')
+    return
+def check_varDec(lines,i,out,srd):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1]=='var':
+        out.write(" " * space)
+        out.write('<varDec>\n')
+        space += 2
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        x=check_type(lines,line_number,out)
+        y=check_identifier(lines,line_number,out)
+        srd.subroutine_table[srd.total_count]=['local',x,y,srd.local_count]
+        srd.local_count+=1
+        srd.total_count+=1
+        check_classVarDec2(lines,line_number,out,srd,x)
+        check_symbol(lines,line_number,out,';')
+        space -= 2
+        out.write(" " * space)
+        out.write('</varDec>\n')
+        check_varDec(lines,line_number,out,srd)
+    return
+def check_expression2(lines,i,out,np,srd,clt):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp == '<symbol> , </symbol>\n':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        np+=1
+        check_expression(lines,line_number,out,srd,clt)
+        np=check_expression2(lines,line_number,out,np,srd,clt)
+    return np
+def check_expressionList(lines,i,out,srd,clt):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    np=0
+    out.write(" " * space)
+    out.write('<expressionList>\n')
+    space += 2
+    if temp.split()[0]=='<integerConstant>' or temp.split()[0]=='<stringConstant>' or temp.split()[1]=='true' \
+        or temp.split()[1]=='false' or temp.split()[1]=='null' or temp.split()[1]=='this' \
+        or temp.split()[0] == '<identifier>' or temp.split()[1]=='(' or temp.split()[1]=='-' \
+        or temp.split()[1]=='~':
+        np+=1
+        check_expression(lines,line_number,out,srd,clt)
+        np=check_expression2(lines,line_number,out,np,srd,clt)
+    space -= 2
+    out.write(" " * space)
+    out.write('</expressionList>\n')
+    return np
+def check_subroutineCall(lines,i,out,srd,clt,x):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1]=='(':
+        fin.write("push pointer 0\n")
+        check_symbol(lines,line_number,out,'(')
+        np=check_expressionList(lines,line_number,out,srd,clt)
+        check_symbol(lines, line_number, out, ')')
+        fin.write(f'call {current_classname}.{x} {np+1}\npop temp 0\n')
+    elif temp.split()[1]=='.':
+        check_symbol(lines,line_number,out,'.')
+        y=check_identifier(lines,line_number,out)
+        a,b=get_type(srd,clt,x)
+        c,d=get_kind(srd,clt,x)
+        if a is not False:
+            fin.write(f"push {c} {d}\n")
+        check_symbol(lines,line_number,out,'(')
+        np=check_expressionList(lines,line_number,out,srd,clt)
+        check_symbol(lines,line_number,out,')')
+        if a is not False:
+            fin.write(f"call {a}.{y} {np+1}\npop temp 0\n")
+        else:
+            fin.write(f"call {x}.{y} {np}\npop temp 0\n")
+def check_subroutineCall1(lines,i,out,srd,clt,x):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1]=='(':
+        fin.write("push pointer 0\n")
+        check_symbol(lines,line_number,out,'(')
+        np=check_expressionList(lines,line_number,out)
+        check_symbol(lines, line_number, out, ')')
+        fin.write(f'call {current_classname}.{x} {np+1}\n')
+    elif temp.split()[1]=='.':
+        check_symbol(lines,line_number,out,'.')
+        y=check_identifier(lines,line_number,out)
+        a,b=get_type(srd,clt,x)
+        c,d=get_kind(srd,clt,x)
+        if a is not False:
+            fin.write(f"push {c} {d}\n")
+        check_symbol(lines,line_number,out,'(')
+        np=check_expressionList(lines,line_number,out,srd,clt)
+        check_symbol(lines,line_number,out,')')
+        if a is not False:
+            fin.write(f"call {a}.{y} {np+1}\n")
+        else:
+            fin.write(f"call {x}.{y} {np}\n")
+def check_term(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    out.write(" " * space)
+    out.write('<term>\n')
+    space += 2
+    if temp.split()[0]=='<integerConstant>':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        fin.write(f"push constant {temp.split()[1]}\n")
+    elif temp.split()[0]=='<stringConstant>':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        string=temp[17:-19]
+        fin.write(f"push constant {len(string)}\ncall String.new 1\n")
+        for i in string:
+            fin.write(f"push constant {ord(i)}\ncall String.appendChar 2\n")
+    elif temp.split()[1]=='true' or temp.split()[1]=='false' or temp.split()[1]=='null' or temp.split()[1]=='this':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        if temp.split()[1]!='this':
+            fin.write("push constant 0\n")
+        else:
+            fin.write("push pointer 0\n")
+        if temp.split()[1]=='true':
+            fin.write("not\n")
+    elif temp.split()[0]=='<identifier>':
+        x=check_identifier(lines, line_number, out)
+        if lines[line_number].split()[1]=='[':
+            check_symbol(lines,line_number,out,'[')
+            check_expression(lines,line_number,out,srd,clt)
+            check_symbol(lines,line_number,out,']')
+            kind,index=get_kind(srd,clt,x)
+            fin.write(f"push {kind} {index}\nadd\npop pointer 1\npush that 0\n")
+        elif lines[line_number].split()[1]=='(':
+            check_subroutineCall1(lines,line_number,out,srd,clt,x)
+        elif lines[line_number].split()[1]=='.':
+            check_subroutineCall1(lines, line_number, out,srd,clt,x)
+        else:
+            kind, type = get_kind(srd, clt, x)
+            fin.write(f"push {kind} {type}\n")
+    elif temp.split()[1]=='(':
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        check_expression(lines,line_number,out,srd,clt)
+        check_symbol(lines,line_number,out,')')
+    elif temp.split()[1]=='-' or temp.split()[1]=='~':
+        out.write(" " * space)
+        out.write(temp)
+        o=temp.split()[1]
+        line_number += 1
+        check_term(lines,line_number,out,srd,clt)
+        if o=='-':
+            fin.write("neg\n")
+        elif o=='~':
+            fin.write("not\n")
+    space -= 2
+    out.write(" " * space)
+    out.write('</term>\n')
+    return
+def check_op(lines,i,out):
+    global space, temp, line_number,check
+    if check == 1:
+        return
+    temp = lines[i]
+    out.write(" " * space)
+    out.write(temp)
+    line_number += 1
+def check_expression1(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1] in op.keys():
+        o=temp.split()[1]
+        check_op(lines,line_number,out)
+        check_term(lines,line_number,out,srd,clt)
+        fin.write(f"{op[o]}")
+        check_expression1(lines,line_number,out,srd,clt)
+    return
+def check_expression(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    out.write(" " * space)
+    out.write('<expression>\n')
+    space += 2
+    check_term(lines,line_number,out,srd,clt)
+    check_expression1(lines,line_number,out,srd,clt)
+    space -= 2
+    out.write(" " * space)
+    out.write('</expression>\n')
+    return
+def check_letstatement(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    b=False
+    if temp.split()[1] == 'let':
+        out.write(" " * space)
+        out.write('<letStatement>\n')
+        space+=2
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        x=check_identifier(lines,line_number,out)
+        y,index=get_kind(srd,clt,x)
+        if not y:
+            err.write(f"Declaration Error: {x} not declared\n")
+            check = 1
+            return
+        if lines[line_number].split()[1]=='[':
+            out.write(" " * space)
+            out.write(lines[line_number])
+            line_number += 1
+            check_expression(lines,line_number,out,srd,clt)
+            check_symbol(lines,line_number,out,']')
+            fin.write(f"push {y} {index}\nadd\n")
+            b=True
+        check_symbol(lines,line_number,out,'=')
+        check_expression(lines,line_number,out,srd,clt)
+        if b:
+            fin.write("pop temp 0\npop pointer 1\npush temp 0\npop that 0\n")
+        else:
+            fin.write(f'pop {y} {index}\n')
+        check_symbol(lines,line_number,out,';')
+        space -= 2
+        out.write(" " * space)
+        out.write('</letStatement>\n')
+    return
+def check_ifstatement(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    val=label_number
+    if temp.split()[1] == 'if':
+        out.write(" " * space)
+        out.write('<ifStatement>\n')
+        space += 2
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        label_number += 2
+        check_symbol(lines,line_number,out,'(')
+        check_expression(lines,line_number,out,srd,clt)
+        check_symbol(lines, line_number, out, ')')
+        check_symbol(lines,line_number,out,'{')
+        fin.write(f"not\nif-goto {current_classname}.{val}\n")
+        check_statements(lines,line_number,out,srd,clt)
+        check_symbol(lines,line_number,out,'}')
+        fin.write(f"goto {current_classname}.{val+1}\nlabel {current_classname}.{val}\n")
+        if lines[line_number].split()[1]=='else':
+            out.write(" " * space)
+            out.write(lines[line_number])
+            line_number += 1
+            check_symbol(lines,line_number,out,'{')
+            check_statements(lines,line_number,out,srd,clt)
+            check_symbol(lines,line_number,out,'}')
+        fin.write(f"label {current_classname}.{val+1}\n")
+        space -= 2
+        out.write(" " * space)
+        out.write('</ifStatement>\n')
+    return
+def check_whilestatement(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    val=label_number
+    if temp.split()[1] == 'while':
+        out.write(" " * space)
+        out.write('<whileStatement>\n')
+        space += 2
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        label_number += 2
+        check_symbol(lines,line_number,out,'(')
+        fin.write(f"label {current_classname}.{val}\n")
+        check_expression(lines,line_number,out,srd,clt)
+        fin.write(f"not\nif-goto {current_classname}.{val+1}\n")
+        check_symbol(lines,line_number,out,')')
+        check_symbol(lines,line_number,out,'{')
+        check_statements(lines,line_number, out,srd,clt)
+        check_symbol(lines, line_number, out, '}')
+        fin.write(f"goto {current_classname}.{val}\nlabel {current_classname}.{val+1}\n")
+        space -= 2
+        out.write(" " * space)
+        out.write('</whileStatement>\n')
+    return
+def check_dostatement(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1] == 'do':
+        out.write(" " * space)
+        out.write('<doStatement>\n')
+        space += 2
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        x=check_identifier(lines, line_number, out)
+        check_subroutineCall(lines,line_number,out,srd,clt,x)
+        check_symbol(lines,line_number,out,';')
+        space -= 2
+        out.write(" " * space)
+        out.write('</doStatement>\n')
+    return
+def check_returnstatement(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1] == 'return':
+        out.write(" " * space)
+        out.write('<returnStatement>\n')
+        space += 2
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        temp=lines[line_number]
+        if temp.split()[0] == '<integerConstant>' or temp.split()[0] == '<stringConstant>' or temp.split()[1] == 'true' \
+                or temp.split()[1] == 'false' or temp.split()[1] == 'null' or temp.split()[1] == 'this' \
+                or temp.split()[0] == '<identifier>' or temp.split()[1] == '(' or temp.split()[1] == '-' \
+                or temp.split()[1] == '~' :
+            check_expression(lines,line_number,out,srd,clt)
+            fin.write("return\n")
+        else:
+            fin.write("push constant 0\nreturn\n")
+        check_symbol(lines,line_number,out,';')
+        space -= 2
+        out.write(" " * space)
+        out.write('</returnStatement>\n')
+    return
+def check_statement(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin
+    global check
+    if check == 1:
+        return
+    temp = lines[i]
+    if temp.split()[1]=='let' or temp.split()[1]=='if' or temp.split()[1]=='while' or temp.split()[1]=='do' \
+        or temp.split()[1] == 'return':
+        check_letstatement(lines,line_number,out,srd,clt)
+        check_ifstatement(lines,line_number,out,srd,clt)
+        check_whilestatement(lines,line_number,out,srd,clt)
+        check_dostatement(lines,line_number,out,srd,clt)
+        check_returnstatement(lines,line_number,out,srd,clt)
+        check_statement(lines,line_number,out,srd,clt)
+    return
+def check_statements(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin,check
+    if check == 1:
+        return
+    temp = lines[i]
+    out.write(" " * space)
+    out.write('<statements>\n')
+    space += 2
+    check_statement(lines, line_number, out,srd,clt)
+    space -= 2
+    out.write(" " * space)
+    out.write('</statements>\n')
+def check_subroutineBody(lines,i,out,srd,clt):
+    global space, temp, line_number, current_classname, current_subname, current_subtype, label_number, inp, err, fin,check
+    if check == 1:
+        return
+    temp = lines[i]
+    out.write(" " * space)
+    out.write('<subroutineBody>\n')
+    space += 2
+    check_symbol(lines,line_number,out,'{')
+    check_varDec(lines,line_number,out,srd)
+    fin.write(f'function {current_classname}.{current_subname} {srd.local_count}\n')
+    if current_subtype=='constructor':
+        fin.write(f'push constant {clt.field_count}\n')
+        fin.write('call Memory.alloc 1\n')
+        fin.write('pop pointer 0\n')
+    elif current_subtype=='method':
+        fin.write('push argument 0\npop pointer 0\n')
+    check_statements(lines,line_number,out,srd,clt)
+    check_symbol(lines,line_number,out,'}')
+    space -= 2
+    out.write(" " * space)
+    out.write('</subroutineBody>\n')
+    return
+def check_addsubRoutineDec(lines,i,out,clt):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin,check
+    temp = lines[i]
+    if check == 1:
+        return
+    if temp.split()[1]=='function' or temp.split()[1]=='constructor' or temp.split()[1]=='method':
+        out.write(" " * space)
+        out.write('<subroutineDec>\n')
+        space += 2
+        out.write(" " * space)
+        out.write(temp)
+        line_number += 1
+        current_subtype=temp.split()[1]
+        if lines[line_number].split()[1]=='void':
+            x='void'
+            out.write(" " * space)
+            out.write(lines[line_number])
+            line_number += 1
+        else:
+            x=check_type(lines,line_number,out)
+        current_subname=check_identifier(lines,line_number,out)
+        srd=SubRoutineDec(current_subname)
+        if current_subtype=='method':
+            srd.subroutine_table[srd.total_count]=['this','argument',current_classname,0]
+            srd.argument_count+=1
+            srd.total_count+=1
+        check_symbol(lines,line_number,out,'(')
+        check_parameterList(lines,line_number,out,srd)
+        check_symbol(lines, line_number, out, ')')
+        check_subroutineBody(lines,line_number,out,srd,clt)
+        space -= 2
+        out.write(" " * space)
+        out.write('</subroutineDec>\n')
+        check_addsubRoutineDec(lines, line_number, out,clt)
+    else:
+        return
+
+
+def check_class(lines,i,out):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin
+    global check
+    temp=lines[i]
+    if check == 1:
+        return
+    if temp=='<keyword> class </keyword>\n':
+        out.write('<class>\n')
+        space+=2
+        out.write(" " * space)
+        out.write(temp)
+        line_number+=1
+        clt = Class_Table(check_identifier(lines,line_number,out))
+        current_classname=clt.get_name()
+        check_symbol(lines,line_number,out,'{')
+        check_addclassVarDec(lines,line_number,out,clt)
+        check_addsubRoutineDec(lines,line_number,out,clt)
+        check_symbol(lines,line_number,out,'}')
+        space-=2
+        out.write('</class>\n')
+        return
+    else:
+        err.write("Error: Expected class but " + temp.split()[1] + "\n")
+        check = 1
+        return
+def check_token(lines,i,out):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,err,fin
+    global check
+    if check == 1:
+        return
+    if lines[i] == '<tokens>\n':
+        line_number+=1
+        check_class(lines,line_number,out)
+        return
+    else:
+        err.write("Error: Expected <tokens> \n")
+        check = 1
+        return
+def fourth_pass(f):
+    global space, temp, line_number, current_classname,current_subname,current_subtype,label_number,inp,out,err,fin
+    global check
+    check = 0
+    space = 0
+    line_number = 0
+    label_number = 0
+    inp = open(f[:-5] + ".token", "r")
+    out = open(f[:-5] + ".xml", "w")
+    err = open(f[:-5] + '.err', "w")
+    fin = open(f[:-5] + '.vm', "w")
+    lines = []
+    line_number = 0
+    for line in inp:
+        lines.append(line)
+    check_token(lines,line_number,out)
+    inp.close()
+    out.close()
+    err.close()
+    fin.close()
+
+first_pass(f)
+second_pass(f)
+fourth_pass(f)
